@@ -2,6 +2,21 @@ local Module = {}
 
 local hooks = {}
 local blocked = {}
+local lastArgs = {}
+
+local function resolveRemote(remote)
+	if typeof(remote) == "string" then
+		local obj = game
+		for part in string.gmatch(remote, "[^%.]+") do
+			obj = obj:FindFirstChild(part)
+			if not obj then
+				return nil
+			end
+		end
+		return obj
+	end
+	return remote
+end
 
 local mt = getrawmetatable(game)
 local old = mt.__namecall
@@ -9,20 +24,23 @@ local old = mt.__namecall
 setreadonly(mt, false)
 
 mt.__namecall = newcclosure(function(self, ...)
-	local args = {...}
 	local method = getnamecallmethod()
+	local args = {...}
 
 	if method == "FireServer" then
-		local data = hooks[self]
-
 		if blocked[self] then
 			return nil
 		end
 
+		local data = hooks[self]
+
 		if data then
-			for i,v in pairs(data.Args) do
-				args[i] = v
+			for index,value in pairs(data.Args) do
+				args[index] = value
 			end
+
+			lastArgs[self] = table.clone(args)
+
 			return old(self, unpack(args))
 		end
 	end
@@ -32,32 +50,49 @@ end)
 
 setreadonly(mt, true)
 
-function Module.New(remote, ...)
+function Module.New(remote, replacements)
+	remote = resolveRemote(remote)
+
+	if not remote then
+		return
+	end
+
 	hooks[remote] = {
-		Args = {...}
+		Args = replacements
 	}
 end
 
 function Module.Block(remote)
-	blocked[remote] = true
+	remote = resolveRemote(remote)
+
+	if remote then
+		blocked[remote] = true
+	end
 end
 
 function Module.Resume(remote)
-	blocked[remote] = nil
+	remote = resolveRemote(remote)
+
+	if remote then
+		blocked[remote] = nil
+	end
 end
 
 function Module.Unhook(remote)
-	hooks[remote] = nil
+	remote = resolveRemote(remote)
+
+	if remote then
+		hooks[remote] = nil
+		lastArgs[remote] = nil
+	end
+end
+
+function Module.CallLastArgs(remote)
+	remote = resolveRemote(remote)
+
+	if remote and lastArgs[remote] then
+		remote:FireServer(unpack(lastArgs[remote]))
+	end
 end
 
 return Module
-
---[[
-HookMetaMethodModule Usage:
-.New (Accepts remotes only, replaces specific arguments on call)
-.Block (blocks a remote)
-.Resume (resumes a blocked remote)
-.Unhook (Unhooks a remote)
-.Hook (hooks a property, currently only WalkSpped is supported, can be expanded to include more properties)
---]]
-
